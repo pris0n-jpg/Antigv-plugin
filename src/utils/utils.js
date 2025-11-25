@@ -76,7 +76,7 @@ function handleUserMessage(extracted, antigravityMessages, enableThinking){
     parts
   });
 }
-function handleAssistantMessage(message, antigravityMessages, isImageModel = false){
+function handleAssistantMessage(message, antigravityMessages, isImageModel = false, enableThinking = false){
   const lastMessage = antigravityMessages[antigravityMessages.length - 1];
   const hasToolCalls = message.tool_calls && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
   const hasContent = message.content &&
@@ -142,7 +142,12 @@ function handleAssistantMessage(message, antigravityMessages, isImageModel = fal
       textContent = textContent.replace(/\n{3,}/g, '\n\n').trim();
       
       if (textContent) {
-        parts.push({ text: textContent });
+        // 在thinking模式下，如果已经有thinking block，需要明确标记非thinking内容
+        if (enableThinking && parts.length > 0) {
+          parts.push({ text: textContent, thought: false });
+        } else {
+          parts.push({ text: textContent });
+        }
       }
     }
     parts.push(...antigravityTools);
@@ -223,7 +228,7 @@ function openaiMessageToAntigravity(openaiMessages, enableThinking, isCompletion
       const extracted = extractImagesFromContent(message.content);
       handleUserMessage(extracted, antigravityMessages, enableThinking);
     } else if (message.role === "assistant") {
-      handleAssistantMessage(message, antigravityMessages, isImageModel);
+      handleAssistantMessage(message, antigravityMessages, isImageModel, enableThinking);
     } else if (message.role === "tool") {
       handleToolCall(message, antigravityMessages);
     }
@@ -370,23 +375,25 @@ function generateRequestBody(openaiMessages,modelName,parameters,openaiTools){
     modelName.startsWith('gemini-3-pro-') ||
     modelName === "rev19-uic3-1p" ||
     modelName === "gpt-oss-120b-medium"
-  const actualModelName = modelName.endsWith('-thinking') ? modelName.slice(0, -9) : modelName;
+  
+  // 用于生成配置的基础模型名（去掉-thinking后缀用于某些配置判断）
+  const baseModelName = modelName.endsWith('-thinking') ? modelName.slice(0, -9) : modelName;
   
   // 检测并拒绝不支持的模型类型
-  const isChatModel = actualModelName.startsWith('chat_');  // chat_ 开头的内部补全模型
+  const isChatModel = baseModelName.startsWith('chat_');  // chat_ 开头的内部补全模型
   
   if (isChatModel) {
-    throw new Error(`Unsupported completion model: ${actualModelName}`);
+    throw new Error(`Unsupported completion model: ${baseModelName}`);
   }
   
   // 标准对话模型使用标准格式
-  const generationConfig = generateGenerationConfig(parameters, enableThinking, actualModelName, false);
+  const generationConfig = generateGenerationConfig(parameters, enableThinking, baseModelName, false);
   
   const requestBody = {
     project: generateProjectId(),
     requestId: generateRequestId(),
     request: {
-      contents: openaiMessageToAntigravity(openaiMessages, enableThinking, false, actualModelName),
+      contents: openaiMessageToAntigravity(openaiMessages, enableThinking, false, baseModelName),
       generationConfig: generationConfig,
       sessionId: generateSessionId(),
       systemInstruction: {
@@ -394,7 +401,7 @@ function generateRequestBody(openaiMessages,modelName,parameters,openaiTools){
         parts: [{ text: config.systemInstruction }]
       }
     },
-    model: actualModelName,
+    model: modelName,  // 使用用户请求的完整模型名（包括-thinking后缀）
     userAgent: "antigravity"
   };
   

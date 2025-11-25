@@ -72,11 +72,22 @@ class MultiAccountClient {
       if (isAvailable) {
         // 如果是共享cookie，检查用户共享配额池
         if (account.is_shared === 1) {
-          // 使用配额基础名称检查（支持配额共享）
-          const quotaBaseName = quotaService.getQuotaBaseName(model_name);
-          const userQuota = await quotaService.getUserModelSharedQuotaPool(user_id, quotaBaseName);
-          if (!userQuota || userQuota.quota <= 0) {
-            logger.warn(`用户共享配额不足: user_id=${user_id}, model=${model_name} (base: ${quotaBaseName}), quota=${userQuota?.quota || 0}`);
+          // 获取该模型所属的配额共享组
+          const sharedModels = quotaService.getQuotaSharedModels(model_name);
+          
+          // 检查用户是否有该共享组中任意模型的配额
+          let hasQuota = false;
+          for (const sharedModel of sharedModels) {
+            const userQuota = await quotaService.getUserModelSharedQuotaPool(user_id, sharedModel);
+            if (userQuota && userQuota.quota > 0) {
+              hasQuota = true;
+              logger.info(`用户共享配额可用: user_id=${user_id}, model=${model_name}, shared_model=${sharedModel}, quota=${userQuota.quota}`);
+              break;
+            }
+          }
+          
+          if (!hasQuota) {
+            logger.warn(`用户共享配额不足: user_id=${user_id}, model=${model_name}, checked_models=${sharedModels.join(', ')}`);
             continue; // 跳过此共享cookie
           }
         }
