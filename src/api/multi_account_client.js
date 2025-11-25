@@ -72,11 +72,22 @@ class MultiAccountClient {
       if (isAvailable) {
         // 如果是共享cookie，检查用户共享配额池
         if (account.is_shared === 1) {
-          // 使用配额基础名称检查（支持配额共享）
-          const quotaBaseName = quotaService.getQuotaBaseName(model_name);
-          const userQuota = await quotaService.getUserModelSharedQuotaPool(user_id, quotaBaseName);
-          if (!userQuota || userQuota.quota <= 0) {
-            logger.warn(`用户共享配额不足: user_id=${user_id}, model=${model_name} (base: ${quotaBaseName}), quota=${userQuota?.quota || 0}`);
+          // 获取该模型所属的配额共享组
+          const sharedModels = quotaService.getQuotaSharedModels(model_name);
+          
+          // 检查用户是否有该共享组中任意模型的配额
+          let hasQuota = false;
+          for (const sharedModel of sharedModels) {
+            const userQuota = await quotaService.getUserModelSharedQuotaPool(user_id, sharedModel);
+            if (userQuota && userQuota.quota > 0) {
+              hasQuota = true;
+              logger.info(`用户共享配额可用: user_id=${user_id}, model=${model_name}, shared_model=${sharedModel}, quota=${userQuota.quota}`);
+              break;
+            }
+          }
+          
+          if (!hasQuota) {
+            logger.warn(`用户共享配额不足: user_id=${user_id}, model=${model_name}, checked_models=${sharedModels.join(', ')}`);
             continue; // 跳过此共享cookie
           }
         }
@@ -145,6 +156,9 @@ class MultiAccountClient {
    */
   async generateResponse(requestBody, callback, user_id, model_name, user) {
     const account = await this.getAvailableAccount(user_id, model_name, user);
+    
+    // 判断是否为 Gemini 模型（不输出 <think> 标记）
+    const isGeminiModel = model_name.startsWith('gemini-');
     
     // 对话开始前实时获取quota，如果为0则重新选择cookie
     let quotaBefore = null;
@@ -254,17 +268,23 @@ class MultiAccountClient {
           if (parts) {
             for (const part of parts) {
               if (part.thought === true) {
-                if (!thinkingStarted) {
-                  callback({ type: 'thinking', content: '<think>\n' });
-                  thinkingStarted = true;
+                if (isGeminiModel) {
+                  // Gemini 模型：将 thought 内容当作普通文本返回
+                  callback({ type: 'text', content: part.text || '' });
+                } else {
+                  // 其他模型：使用 <think> 标记包裹
+                  if (!thinkingStarted) {
+                    callback({ type: 'thinking', content: '<think>\n' });
+                    thinkingStarted = true;
+                  }
+                  callback({ type: 'thinking', content: part.text || '' });
                 }
-                callback({ type: 'thinking', content: part.text || '' });
               } else if (part.text !== undefined) {
                 // 过滤掉空的非thought文本
                 if (part.text.trim() === '') {
                   continue;
                 }
-                if (thinkingStarted) {
+                if (thinkingStarted && !isGeminiModel) {
                   callback({ type: 'thinking', content: '\n</think>\n' });
                   thinkingStarted = false;
                 }
@@ -296,7 +316,7 @@ class MultiAccountClient {
           }
           
           if (data.response?.candidates?.[0]?.finishReason) {
-            if (thinkingStarted) {
+            if (thinkingStarted && !isGeminiModel) {
               callback({ type: 'thinking', content: '\n</think>\n' });
               thinkingStarted = false;
             }

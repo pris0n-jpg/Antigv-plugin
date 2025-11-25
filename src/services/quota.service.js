@@ -3,27 +3,58 @@ import logger from '../utils/logger.js';
 
 class QuotaService {
   /**
+   * 定义配额共享组
+   * 同一组内的模型共享配额池
+   */
+  getQuotaSharedGroups() {
+    return {
+      // Gemini 3 pro 系列共享配额
+      'gemini-3-pro': ['gemini-3-pro-low', 'gemini-3-pro-high'],
+      
+      // Claude 4.5 系列共享配额
+      'claude-sonnet-4-5': ['claude-sonnet-4-5', 'claude-sonnet-4-5-thinking'],
+      
+      // Gemini 2.5 pro 系列共享配额
+      'gemini-2.5-pro': ['gemini-2.5-pro', 'gemini-2.5-pro-thinking'],
+    };
+  }
+
+  /**
+   * 获取模型所属的配额共享组（返回该组的所有模型）
+   * @param {string} model_name - 模型名称
+   * @returns {Array<string>} 共享组中的所有模型名称（包括自己）
+   */
+  getQuotaSharedModels(model_name) {
+    const sharedGroups = this.getQuotaSharedGroups();
+    
+    // 查找该模型属于哪个共享组
+    for (const [groupName, models] of Object.entries(sharedGroups)) {
+      if (models.includes(model_name)) {
+        return models;
+      }
+    }
+    
+    // 如果不在任何共享组中，返回自己
+    return [model_name];
+  }
+
+  /**
    * 获取模型的配额基础名称（用于配额共享）
    * @param {string} model_name - 模型名称
    * @returns {string} 配额基础名称
    */
   getQuotaBaseName(model_name) {
-    // 定义配额共享的模型映射
-    const quotaMap = {
-      // Gemini 3 pro 系列共享配额
-      'gemini-3-pro-low': 'gemini-3-pro',
-      'gemini-3-pro-high': 'gemini-3-pro',
-      'gemini-3-pro': 'gemini-3-pro',
-      
-      // Claude 4.5 系列共享配额
-      'claude-sonnet-4-5': 'claude-sonnet-4-5',
-      'claude-sonnet-4-5-thinking': 'claude-sonnet-4-5',
-      
-      // 其他thinking模型映射到基础模型
-      'gemini-2.5-pro-thinking': 'gemini-2.5-pro',
-    };
+    const sharedGroups = this.getQuotaSharedGroups();
     
-    return quotaMap[model_name] || model_name;
+    // 查找该模型属于哪个共享组
+    for (const [groupName, models] of Object.entries(sharedGroups)) {
+      if (models.includes(model_name)) {
+        return groupName;
+      }
+    }
+    
+    // 如果不在任何共享组中，返回自己
+    return model_name;
   }
   /**
    * 更新或创建模型配额
@@ -506,12 +537,17 @@ class QuotaService {
       
       // 如果使用的是共享cookie，扣减用户共享配额池
       if (is_shared === 1 && quota_consumed > 0) {
-        // 使用配额基础名称进行扣减（支持配额共享）
-        const quotaBaseName = this.getQuotaBaseName(model_name);
-        await this.deductUserSharedQuota(user_id, quotaBaseName, quota_consumed);
+        // 获取该模型所属的配额共享组
+        const sharedModels = this.getQuotaSharedModels(model_name);
         
-        if (quotaBaseName !== model_name) {
-          logger.info(`配额共享: ${model_name} -> ${quotaBaseName}`);
+        // 同时扣减共享组中所有模型的用户配额
+        for (const sharedModel of sharedModels) {
+          await this.deductUserSharedQuota(user_id, sharedModel, quota_consumed);
+          logger.info(`扣减共享配额: user_id=${user_id}, model=${sharedModel}, amount=${quota_consumed}`);
+        }
+        
+        if (sharedModels.length > 1) {
+          logger.info(`配额共享组: [${sharedModels.join(', ')}] - 已同时扣减${sharedModels.length}个模型的配额`);
         }
       }
       

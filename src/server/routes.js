@@ -803,14 +803,6 @@ router.post('/v1/chat/completions', authenticateApiKey, async (req, res) => {
         } else if (data.type === 'image') {
           // 收集图像数据,稍后一起返回
           collectedImages.push(data.image);
-          // 也可以立即以文本形式提示用户
-          res.write(`data: ${JSON.stringify({
-            id,
-            object: 'chat.completion.chunk',
-            created,
-            model,
-            choices: [{ index: 0, delta: { content: `\n[图像生成完成: ${data.image.mimeType}]\n` }, finish_reason: null }]
-          })}\n\n`);
         } else {
           res.write(`data: ${JSON.stringify({
             id,
