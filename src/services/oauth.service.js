@@ -416,10 +416,11 @@ class OAuthService {
     // 第一步：获取project_id并检查账号资格
     let project_id_0 = '';
     let is_restricted = false;
-    let ineligible = null;
+    let ineligible = false;
+    let projectData = null;
     
     try {
-      const projectData = await projectService.loadCodeAssist(tokenData.access_token);
+      projectData = await projectService.loadCodeAssist(tokenData.access_token);
       
       // 检查是否为 INELIGIBLE_ACCOUNT
       if (projectData.ineligibleTiers && projectData.ineligibleTiers.length > 0) {
