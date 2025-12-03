@@ -75,6 +75,14 @@ async function generateProjectIdsForAllAccounts() {
         logger.info(`  ✓ 项目ID已更新:`);
         logger.info(`    project_id_0: ${updatedAccount.project_id_0 || '(空 - 地区受限)'}`);
         logger.info(`    is_restricted: ${updatedAccount.is_restricted}`);
+        
+        // 如果project_id_0为空，禁用账号
+        if (!updatedAccount.project_id_0) {
+          logger.warn(`  ⚠ project_id_0为空，正在禁用账号...`);
+          await accountService.updateAccountStatus(account.cookie_id, 0);
+          logger.info(`  ✓ 账号已禁用`);
+        }
+        
         successCount++;
         
       } catch (error) {
