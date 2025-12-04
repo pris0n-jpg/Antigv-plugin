@@ -96,15 +96,6 @@ class OAuthService {
     const requestId = crypto.randomUUID().substring(0, 8);
     const startTime = Date.now();
     
-    logger.info(`[${requestId}] 开始Token交换流程`);
-    logger.info(`[${requestId}] 请求参数:`, {
-      code_length: code ? code.length : 0,
-      client_id: CLIENT_ID,
-      redirect_uri: callbackUrl,
-      grant_type: 'authorization_code',
-      has_client_secret: !!CLIENT_SECRET
-    });
-    
     return new Promise((resolve, reject) => {
       const postData = new URLSearchParams({
         code: code,

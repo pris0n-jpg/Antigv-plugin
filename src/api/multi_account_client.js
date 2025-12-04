@@ -132,7 +132,6 @@ class MultiAccountClient {
     
     logger.info(`========== 最终选择账号 ==========`);
     logger.info(`选中账号: cookie_id=${account.cookie_id}, is_shared=${account.is_shared}, user_id=${account.user_id}`);
-    logger.info(`所有配额可用账号: ${JSON.stringify(availableAccounts.map(a => ({ cookie_id: a.cookie_id, is_shared: a.is_shared, user_id: a.user_id })))}`);
 
     // 检查token是否过期，如果过期则刷新
     if (accountService.isTokenExpired(account)) {
@@ -526,7 +525,6 @@ class MultiAccountClient {
       }
       
       // 更新到数据库
-      logger.info(`[DEBUG]: modelsData: ${modelsData ? JSON.stringify(modelsData) : 'null'}`);
       if (Object.keys(modelsData).length > 0) {
         await quotaService.updateQuotasFromModels(cookie_id, modelsData);
       }
