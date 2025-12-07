@@ -245,8 +245,22 @@ class MultiAccountClient {
         const responseText = await response.text();
         
         if (response.status === 403) {
-          logger.warn(`账号没有使用权限，已禁用: cookie_id=${account.cookie_id}`);
+          logger.warn(`账号没有使用权限(403)，已禁用: cookie_id=${account.cookie_id}`);
           await accountService.updateAccountStatus(account.cookie_id, 0);
+        }
+        
+        // 检查是否是400错误（可能是账号问题）
+        if (response.status === 400) {
+          // 检查是否是配额耗尽错误
+          if (responseText.includes('quota') || responseText.includes('RESOURCE_EXHAUSTED')) {
+            logger.error(`[400错误] project_id_0 配额耗尽`);
+            callback({ type: 'error', content: 'RESOURCE_EXHAUSTED' });
+            return;
+          }
+          // 其他400错误，禁用账号
+          logger.warn(`账号请求失败(400)，已禁用: cookie_id=${account.cookie_id}, error=${responseText.substring(0, 200)}`);
+          await accountService.updateAccountStatus(account.cookie_id, 0);
+          throw new ApiError(responseText, response.status, responseText);
         }
         
         // 检查是否是配额耗尽错误
@@ -595,7 +609,15 @@ class MultiAccountClient {
       account = await this.getAvailableAccount(user_id, model_name, user);
     }
     
-    logger.info(`开始图片生成 - cookie_id=${account.cookie_id}, model=${model_name}`);
+    // 获取请求前的配额信息
+    let quotaBefore = null;
+    try {
+      const quotaInfo = await quotaService.getQuota(account.cookie_id, model_name);
+      quotaBefore = quotaInfo ? parseFloat(quotaInfo.quota) : null;
+      logger.info(`图片生成开始 - cookie_id=${account.cookie_id}, model=${model_name}, quota_before=${quotaBefore}`);
+    } catch (error) {
+      logger.warn('获取缓存配额失败:', error.message);
+    }
     
     // 使用账号的 project_id_0
     if (account.project_id_0) {
@@ -637,13 +659,26 @@ class MultiAccountClient {
         const responseText = await response.text();
         
         if (response.status === 403) {
-          logger.warn(`账号没有使用权限，已禁用: cookie_id=${account.cookie_id}`);
+          logger.warn(`账号没有使用权限(403)，已禁用: cookie_id=${account.cookie_id}`);
           await accountService.updateAccountStatus(account.cookie_id, 0);
         }
         
-        // 检查是否是配额耗尽错误（400或429）
-        if (response.status === 400 || response.status === 429 || responseText.includes('quota') || responseText.includes('RESOURCE_EXHAUSTED')) {
-          logger.error(`[图片生成-配额错误] project_id_0 配额耗尽 (HTTP ${response.status})`);
+        // 检查是否是400错误
+        if (response.status === 400) {
+          // 检查是否是配额耗尽错误
+          if (responseText.includes('quota') || responseText.includes('RESOURCE_EXHAUSTED')) {
+            logger.error(`[图片生成-400错误] project_id_0 配额耗尽`);
+            throw new ApiError('RESOURCE_EXHAUSTED', response.status, 'RESOURCE_EXHAUSTED');
+          }
+          // 其他400错误，禁用账号
+          logger.warn(`账号请求失败(400)，已禁用: cookie_id=${account.cookie_id}, error=${responseText.substring(0, 200)}`);
+          await accountService.updateAccountStatus(account.cookie_id, 0);
+          throw new ApiError(responseText, response.status, responseText);
+        }
+        
+        // 检查是否是429配额耗尽错误
+        if (response.status === 429 || responseText.includes('quota') || responseText.includes('RESOURCE_EXHAUSTED')) {
+          logger.error(`[图片生成-429错误] project_id_0 配额耗尽`);
           throw new ApiError('RESOURCE_EXHAUSTED', response.status, 'RESOURCE_EXHAUSTED');
         } else {
           throw new ApiError(responseText, response.status, responseText);
@@ -691,12 +726,35 @@ class MultiAccountClient {
       ]
     };
     
-    // 图片生成完成后，更新配额信息
+    // 图片生成完成后，更新配额信息并记录消耗
     try {
-      await this.refreshCookieQuota(account.cookie_id, account.access_token);
-      logger.info(`图片生成完成，配额已更新 - cookie_id=${account.cookie_id}`);
+      const quotaAfter = await this.updateQuotaAfterCompletion(account.cookie_id, model_name);
+      
+      // 记录配额消耗
+      if (quotaBefore !== null && quotaAfter !== null) {
+        let consumed = parseFloat(quotaBefore) - parseFloat(quotaAfter);
+        
+        // 如果消耗为负数，说明配额在请求期间重置了，记录消耗为0
+        if (consumed < 0) {
+          logger.info(`配额在请求期间重置，记录消耗为0 - quota_before=${quotaBefore}, quota_after=${quotaAfter}`);
+          consumed = 0;
+        }
+        
+        await quotaService.recordQuotaConsumption(
+          user_id,
+          account.cookie_id,
+          model_name,
+          quotaBefore,
+          quotaAfter,
+          account.is_shared
+        );
+        logger.info(`图片生成配额消耗已记录 - user_id=${user_id}, is_shared=${account.is_shared}, consumed=${consumed.toFixed(4)}`);
+      } else {
+        logger.warn(`无法记录图片生成配额消耗 - quotaBefore=${quotaBefore}, quotaAfter=${quotaAfter}`);
+      }
     } catch (error) {
-      logger.error('更新配额失败:', error.message);
+      logger.error('更新配额或记录消耗失败:', error.message, error.stack);
+      // 不影响主流程，只记录错误
     }
     
     return data;
