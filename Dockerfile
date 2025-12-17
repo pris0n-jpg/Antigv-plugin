@@ -19,7 +19,7 @@ COPY package.json package-lock.json* ./
 # 安装生产环境依赖。
 # 使用 'npm ci' 是最佳实践，它比 'npm install' 更快、更可靠，因为它严格按照 lock 文件安装。
 # '--only=production' 确保不安装devDependencies。
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 
 # --- 构建阶段 (Build Stage) ---
