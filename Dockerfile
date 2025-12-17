@@ -14,7 +14,7 @@ FROM base AS dependencies
 
 # 复制 package.json 和 package-lock.json (或 yarn.lock, pnpm-lock.yaml)
 # 这样做可以充分利用Docker的层缓存。只要这些文件不改变，就不需要重新安装依赖。
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 
 # 安装生产环境依赖。
 # 使用 'npm ci' 是最佳实践，它比 'npm install' 更快、更可靠，因为它严格按照 lock 文件安装。
